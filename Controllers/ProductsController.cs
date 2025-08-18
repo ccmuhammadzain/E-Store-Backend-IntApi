@@ -1,4 +1,6 @@
-﻿using InventoryApi.Data;
+﻿//ProductsController.cs
+
+using InventoryApi.Data;
 using InventoryApi.models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
