@@ -1,9 +1,10 @@
-﻿namespace InventoryApi.Dtos
+﻿using System.Text.Json.Serialization;
+
+namespace InventoryApi.Dtos
 {
     public class BillCreateDto
     {
-        public int UserId { get; set; }
-        public decimal TotalAmount { get; set; }
-        public List<BillItemCreateDto> BillItems { get; set; }
+        public List<BillItemCreateDto> BillItems { get; set; } = new();
+        [JsonPropertyName("cartItems")] public List<BillItemCreateDto>? CartItems { get; set; }
     }
 }

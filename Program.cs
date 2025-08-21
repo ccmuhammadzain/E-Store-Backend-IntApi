@@ -22,6 +22,10 @@ builder.Services.AddCors(options =>
         policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 });
 
+var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key missing");
+var issuer = builder.Configuration["Jwt:Issuer"]; // may be null if not configured
+var audience = builder.Configuration["Jwt:Audience"]; // may be null if not configured
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -31,12 +35,15 @@ builder.Services.AddAuthentication(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {
-        ValidateIssuer = false,
-        ValidateAudience = false,
+        ValidateIssuer = !string.IsNullOrEmpty(issuer),
+        ValidateAudience = !string.IsNullOrEmpty(audience),
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+            Encoding.UTF8.GetBytes(jwtKey)),
+        ValidIssuer = issuer,
+        ValidAudience = audience,
+        ClockSkew = TimeSpan.Zero
     };
 });
 
