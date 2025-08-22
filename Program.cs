@@ -2,7 +2,6 @@ using InventoryApi.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Authentication.JwtBearer; 
-
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
@@ -49,8 +48,32 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-
 var app = builder.Build();
+
+// Enhanced migration application & logging
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        var pending = await db.Database.GetPendingMigrationsAsync();
+        if (pending.Any())
+        {
+            Console.WriteLine("[MIGRATIONS] Applying pending migrations: " + string.Join(", ", pending));
+            await db.Database.MigrateAsync();
+            Console.WriteLine("[MIGRATIONS] Applied successfully.");
+        }
+        else
+        {
+            Console.WriteLine("[MIGRATIONS] No pending migrations.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[MIGRATION_ERROR] " + ex.Message);
+        Console.WriteLine(ex);
+    }
+}
 
 app.UseCors("AllowAll");
 
