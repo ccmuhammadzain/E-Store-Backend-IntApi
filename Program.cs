@@ -1,6 +1,6 @@
 using InventoryApi.Data;
+using InventoryApi.models;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Authentication.JwtBearer; 
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -22,8 +22,8 @@ builder.Services.AddCors(options =>
 });
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key missing");
-var issuer = builder.Configuration["Jwt:Issuer"]; // may be null if not configured
-var audience = builder.Configuration["Jwt:Audience"]; // may be null if not configured
+var issuer = builder.Configuration["Jwt:Issuer"]; 
+var audience = builder.Configuration["Jwt:Audience"]; 
 
 builder.Services.AddAuthentication(options =>
 {
@@ -46,11 +46,15 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOrSuper", p => p.RequireRole("Admin", "SuperAdmin"));
+    options.AddPolicy("SuperOnly", p => p.RequireRole("SuperAdmin"));
+});
 
 var app = builder.Build();
 
-// Enhanced migration application & logging
+// Enhanced migration application & logging + SuperAdmin seed
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -67,6 +71,22 @@ using (var scope = app.Services.CreateScope())
         {
             Console.WriteLine("[MIGRATIONS] No pending migrations.");
         }
+
+        // Seed SuperAdmin user if none exists
+        if (!await db.Users.AnyAsync(u => u.Role == "SuperAdmin"))
+        {
+            var superPassword = "SuperAdmin#12345"; // In real production load from secure secret
+            var hashed = BCrypt.Net.BCrypt.HashPassword(superPassword);
+            db.Users.Add(new User
+            {
+                Username = "superadmin",
+                PasswordHash = hashed,
+                Role = "SuperAdmin",
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+            Console.WriteLine("[SEED] SuperAdmin user created (username: superadmin). CHANGE THE PASSWORD IMMEDIATELY.");
+        }
     }
     catch (Exception ex)
     {
@@ -76,15 +96,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors("AllowAll");
-
 app.UseSwagger();
 app.UseSwaggerUI();
-
 app.UseAuthentication();   
 app.UseAuthorization();
-
-
 app.MapGet("/", () => "Inventory API running");
 app.MapControllers();
-
 app.Run();

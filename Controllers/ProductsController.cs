@@ -4,6 +4,7 @@ using InventoryApi.Data;
 using InventoryApi.models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 
 namespace InventoryApi.Controllers
 {
@@ -18,15 +19,17 @@ namespace InventoryApi.Controllers
             _context = context;
         }
 
-        // GET: api/products
+        // GET: api/products (public)
         [HttpGet]
+        [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<Product>>> GetProducts()
         {
             return await _context.Products.ToListAsync();
         }
 
-        // GET: api/products/{id}
+        // GET: api/products/{id} (public)
         [HttpGet("{id}")]
+        [AllowAnonymous]
         public async Task<ActionResult<Product>> GetProduct(int id)
         {
             var product = await _context.Products.FindAsync(id);
@@ -34,8 +37,9 @@ namespace InventoryApi.Controllers
             return product;
         }
 
-        // POST: api/products
+        // POST: api/products (Admin or SuperAdmin)
         [HttpPost]
+        [Authorize(Policy = "AdminOrSuper")]
         public async Task<ActionResult<Product>> CreateProduct(Product product)
         {
             _context.Products.Add(product);
@@ -43,25 +47,24 @@ namespace InventoryApi.Controllers
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
 
-        // PUT: api/products/{id}
+        // PUT: api/products/{id} (Admin or SuperAdmin)
         [HttpPut("{id}")]
+        [Authorize(Policy = "AdminOrSuper")]
         public async Task<IActionResult> UpdateProduct(int id, Product product)
         {
             if (id != product.Id) return BadRequest();
-
             _context.Entry(product).State = EntityState.Modified;
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
-        // DELETE: api/products/{id}
+        // DELETE: api/products/{id} (Admin or SuperAdmin)
         [HttpDelete("{id}")]
+        [Authorize(Policy = "AdminOrSuper")]
         public async Task<IActionResult> DeleteProduct(int id)
         {
             var product = await _context.Products.FindAsync(id);
             if (product == null) return NotFound();
-
             _context.Products.Remove(product);
             await _context.SaveChangesAsync();
             return NoContent();
