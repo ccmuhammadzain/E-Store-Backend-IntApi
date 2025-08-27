@@ -14,6 +14,20 @@ namespace InventoryApi.Controllers
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
+        private static readonly HashSet<string> AllowedRoles = new(StringComparer.OrdinalIgnoreCase)
+        { "SuperAdmin", "Admin", "Seller", "Customer" };
+
+        private static string NormalizeRole(string? role)
+        {
+            if (string.IsNullOrWhiteSpace(role)) return "Customer";
+            // Map ignoring case to canonical forms
+            if (role.Equals("superadmin", StringComparison.OrdinalIgnoreCase)) return "SuperAdmin";
+            if (role.Equals("admin", StringComparison.OrdinalIgnoreCase)) return "Admin";
+            if (role.Equals("seller", StringComparison.OrdinalIgnoreCase)) return "Seller";
+            if (role.Equals("customer", StringComparison.OrdinalIgnoreCase)) return "Customer";
+            return "Customer"; // fallback
+        }
+
         private readonly AppDbContext _context;
         private readonly IConfiguration _config;
 
@@ -26,6 +40,8 @@ namespace InventoryApi.Controllers
         [HttpPost("signup")]
         public async Task<IActionResult> Signup(User user)
         {
+            user.Role = NormalizeRole(user.Role);
+            if (!AllowedRoles.Contains(user.Role)) return BadRequest("Invalid role");
             if (await _context.Users.AnyAsync(u => u.Username == user.Username))
                 return BadRequest("Username already exists");
 
@@ -41,6 +57,14 @@ namespace InventoryApi.Controllers
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == login.Username);
             if (user == null || !BCrypt.Net.BCrypt.Verify(login.PasswordHash, user.PasswordHash))
                 return Unauthorized("Invalid credentials");
+
+            // Normalize stored role if legacy data has different casing
+            var normalized = NormalizeRole(user.Role);
+            if (normalized != user.Role)
+            {
+                user.Role = normalized;
+                await _context.SaveChangesAsync();
+            }
 
             var token = GenerateJwtToken(user);
             return Ok(new { token, role = user.Role, id = user.Id });
