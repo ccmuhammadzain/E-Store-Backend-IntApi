@@ -41,6 +41,13 @@ namespace InventoryApi.Data
             modelBuilder.Entity<Product>()
                 .Property(p => p.Price)
                 .HasColumnType("decimal(18,2)");
+
+            // Product Owner (Seller) optional
+            modelBuilder.Entity<Product>()
+                .HasOne(p => p.Owner)
+                .WithMany()
+                .HasForeignKey(p => p.OwnerId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }
