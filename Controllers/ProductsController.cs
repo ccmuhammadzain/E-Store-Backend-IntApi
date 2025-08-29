@@ -20,10 +20,34 @@ namespace InventoryApi.Controllers
 
         private static ProductDto ToDto(Product p) => new ProductDto(p.Id, p.Title, p.Category, p.Brand, p.Price, p.Stock, p.ProductImage, p.OwnerId, p.Owner.Username);
 
-        // PUBLIC: list products for customers / shop
+        // PUBLIC / Authenticated: list products
+        // For Admin / Seller users we now restrict visibility to ONLY their own active products.
+        // SuperAdmin can use /api/Products/all to view all.
         [HttpGet]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<ProductDto>>> ListPublic()
+        {
+            IQueryable<Product> query = _db.Products.Include(p => p.Owner)
+                .Where(p => p.IsActive && p.Owner.IsActive);
+
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var role = User.GetRole();
+                if (role == "Admin" || role == "Seller")
+                {
+                    var userId = User.GetUserId();
+                    query = query.Where(p => p.OwnerId == userId);
+                }
+            }
+
+            var list = await query.AsNoTracking().ToListAsync();
+            return Ok(list.Select(ToDto));
+        }
+
+        // SUPERADMIN full active list
+        [HttpGet("all")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<ActionResult<IEnumerable<ProductDto>>> ListAllForSuper()
         {
             var list = await _db.Products.Include(p => p.Owner)
                 .Where(p => p.IsActive && p.Owner.IsActive)
@@ -31,13 +55,23 @@ namespace InventoryApi.Controllers
             return Ok(list.Select(ToDto));
         }
 
-        // PUBLIC: get single product detail
+        // PUBLIC: get single product detail (Admins/Sellers can only fetch their own)
         [HttpGet("{id:int}")]
         [AllowAnonymous]
         public async Task<ActionResult<ProductDto>> GetPublic(int id)
         {
-            var prod = await _db.Products.Include(p => p.Owner)
-                .FirstOrDefaultAsync(p => p.Id == id && p.IsActive && p.Owner.IsActive);
+            IQueryable<Product> query = _db.Products.Include(p => p.Owner)
+                .Where(p => p.Id == id && p.IsActive && p.Owner.IsActive);
+            if (User.Identity?.IsAuthenticated == true)
+            {
+                var role = User.GetRole();
+                if (role == "Admin" || role == "Seller")
+                {
+                    var userId = User.GetUserId();
+                    query = query.Where(p => p.OwnerId == userId);
+                }
+            }
+            var prod = await query.FirstOrDefaultAsync();
             if (prod == null) return NotFound();
             return Ok(ToDto(prod));
         }
@@ -85,15 +119,15 @@ END";
             return CreatedAtAction(nameof(GetPublic), new { id = entity.Id }, ToDto(entity));
         }
 
-        // SELLER / ADMIN inventory (still available)
+        // SELLER / ADMIN inventory (only own products) | SuperAdmin sees all
         [HttpGet("mine")]
         [Authorize(Roles = "Seller,Admin,SuperAdmin")]
         public async Task<ActionResult<IEnumerable<ProductDto>>> Mine()
         {
             var role = User.GetRole();
-            if (role == "Seller")
+            var userId = User.GetUserId();
+            if (role == "Seller" || role == "Admin")
             {
-                var userId = User.GetUserId();
                 var own = await _db.Products.Include(p => p.Owner)
                     .Where(p => p.OwnerId == userId)
                     .AsNoTracking().ToListAsync();
@@ -111,7 +145,7 @@ END";
             var prod = await _db.Products.Include(p => p.Owner).FirstOrDefaultAsync(p => p.Id == id);
             if (prod == null) return NotFound();
             if (!prod.IsActive || !prod.Owner.IsActive) return BadRequest("Product or owner inactive");
-            if (User.IsInRole("Seller") && prod.OwnerId != User.GetUserId()) return Forbid();
+            if ((User.IsInRole("Seller") || User.IsInRole("Admin")) && prod.OwnerId != User.GetUserId()) return Forbid();
             prod.Title = dto.Title;
             prod.Category = dto.Category;
             prod.Brand = dto.Brand;
@@ -129,7 +163,7 @@ END";
         {
             var prod = await _db.Products.FirstOrDefaultAsync(p => p.Id == id);
             if (prod == null) return NotFound();
-            if (User.IsInRole("Seller") && prod.OwnerId != User.GetUserId()) return Forbid();
+            if ((User.IsInRole("Seller") || User.IsInRole("Admin")) && prod.OwnerId != User.GetUserId()) return Forbid();
             // soft delete
             prod.IsActive = false;
             prod.UpdatedAt = DateTime.UtcNow;

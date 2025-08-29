@@ -5,12 +5,12 @@ using InventoryApi.Data;
 using InventoryApi.models;
 using InventoryApi.Dtos;
 using System.Security.Claims;
+using InventoryApi.Extensions;
 
 namespace InventoryApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]
     public class BillsController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -22,61 +22,69 @@ namespace InventoryApi.Controllers
             _env = env;
         }
 
-        // GET: api/Bills (could restrict to current user later)
+        // GET: api/Bills
+        // Rules:
+        // - Customer: only their own bills
+        // - Admin/Seller: bills that include at least one product they own
+        // - SuperAdmin: all bills
         [HttpGet]
-        [AllowAnonymous]
+        [Authorize]
         public async Task<ActionResult<IEnumerable<Bill>>> GetBills()
         {
-            return await _context.Bills
-                .Include(b => b.BillItems)
-                .ThenInclude(bi => bi.Product)
-                .Include(b => b.User)
-                .ToListAsync();
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId)) return Unauthorized();
+            var role = User.FindFirst(ClaimTypes.Role)?.Value;
+
+            IQueryable<Bill> query = _context.Bills
+                .Include(b => b.BillItems).ThenInclude(bi => bi.Product)
+                .Include(b => b.User);
+
+            if (role == "SuperAdmin")
+            {
+                return await query.ToListAsync();
+            }
+            else if (role == "Admin" || role == "Seller")
+            {
+                // Bills that have at least one item whose product owner is this admin/seller
+                query = query.Where(b => b.BillItems.Any(it => it.Product.OwnerId == userId));
+                return await query.ToListAsync();
+            }
+            else
+            {
+                // Customer: only own bills
+                query = query.Where(b => b.UserId == userId);
+                return await query.ToListAsync();
+            }
         }
 
-        // GET: api/Bills/5
+        // GET: api/Bills/5 (same visibility rules)
         [HttpGet("{id}")]
-        [AllowAnonymous]
+        [Authorize]
         public async Task<ActionResult<Bill>> GetBill(int id)
         {
-            var bill = await _context.Bills.FirstOrDefaultAsync(b => b.Id == id);
-            if (bill == null)
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId)) return Unauthorized();
+            var role = User.FindFirst(ClaimTypes.Role)?.Value;
+
+            var bill = await _context.Bills
+                .Include(b => b.BillItems).ThenInclude(bi => bi.Product)
+                .Include(b => b.User)
+                .FirstOrDefaultAsync(b => b.Id == id);
+            if (bill == null) return NotFound();
+
+            bool authorized = role switch
             {
-                return NotFound();
-            }
-            await _context.Entry(bill).Collection(b => b.BillItems).LoadAsync();
-            await _context.Entry(bill).Reference(b => b.User).LoadAsync();
-            foreach (var item in bill.BillItems)
-            {
-                await _context.Entry(item).Reference(i => i.Product).LoadAsync();
-            }
+                "SuperAdmin" => true,
+                "Admin" or "Seller" => bill.BillItems.Any(it => it.Product.OwnerId == userId),
+                _ => bill.UserId == userId
+            };
+            if (!authorized) return Forbid();
             return bill;
         }
 
-        // DEBUG: schema + pending migrations (remove in production)
-        [HttpGet("debug/schema")]
-        [AllowAnonymous]
-        public async Task<IActionResult> DebugSchema()
-        {
-            // List columns in Bills table & pending migrations
-            var columns = await _context.Database
-                .SqlQueryRaw<string>("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Bills'")
-                .ToListAsync();
-            var pending = await _context.Database.GetPendingMigrationsAsync();
-            return Ok(new { columns, pendingMigrations = pending });
-        }
-
-        private static List<BillItemCreateDto> NormalizeItems(BillCreateDto dto)
-        {
-            if (dto.BillItems != null && dto.BillItems.Count > 0)
-                return dto.BillItems;
-            if (dto.CartItems != null && dto.CartItems.Count > 0)
-                return dto.CartItems;
-            return new List<BillItemCreateDto>();
-        }
-
-        // POST: api/Bills (create pending bill from cart)
+        // POST: api/Bills (create pending bill from cart) - customer / any authenticated user placing order
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<Bill>> PostBill(BillCreateDto billDto)
         {
             try
@@ -155,6 +163,7 @@ namespace InventoryApi.Controllers
 
         // POST: api/Bills/{id}/pay  (mark bill as paid and capture checkout details)
         [HttpPost("{id}/pay")]
+        [Authorize]
         public async Task<IActionResult> PayBill(int id, BillPaymentDto paymentDto)
         {
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
@@ -182,6 +191,7 @@ namespace InventoryApi.Controllers
 
         // DELETE: api/Bills/{id} (cancel bill if still pending and owned by user)
         [HttpDelete("{id}")]
+        [Authorize]
         public async Task<IActionResult> DeleteBill(int id)
         {
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) ?? User.FindFirst("sub");
@@ -195,6 +205,15 @@ namespace InventoryApi.Controllers
             bill.Status = BillStatus.Canceled;
             await _context.SaveChangesAsync();
             return Ok(new { bill.Id, bill.Status });
+        }
+
+        private static List<BillItemCreateDto> NormalizeItems(BillCreateDto dto)
+        {
+            if (dto.BillItems != null && dto.BillItems.Count > 0)
+                return dto.BillItems;
+            if (dto.CartItems != null && dto.CartItems.Count > 0)
+                return dto.CartItems;
+            return new List<BillItemCreateDto>();
         }
     }
 }

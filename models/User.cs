@@ -18,5 +18,7 @@ namespace InventoryApi.models
         public User? DeactivatedBy { get; set; }
         [Timestamp]
         public byte[]? RowVersion { get; set; }
+        // Admin level (badge) - default 1 for Admin role
+        public int Level { get; set; } = 1;
     }
 }

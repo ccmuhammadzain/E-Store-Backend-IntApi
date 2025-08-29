@@ -31,7 +31,8 @@ namespace InventoryApi.Controllers
                     Email = null,
                     CreatedAt = u.CreatedAt,
                     IsActive = u.IsActive,
-                    DeactivatedAt = u.DeactivatedAt
+                    DeactivatedAt = u.DeactivatedAt,
+                    Level = u.Level
                 })
                 .ToListAsync();
             return admins; // 200 [] if empty
@@ -104,6 +105,32 @@ namespace InventoryApi.Controllers
                 }
             }
             return NoContent();
+        }
+
+        // POST: /api/Users/{id}/promote (SuperAdmin) - increases level
+        [HttpPost("{id:int}/promote")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> Promote(int id)
+        {
+            var target = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && (u.Role == "Admin" || u.Role == "Seller"));
+            if (target == null) return NotFound();
+            if (!target.IsActive) return BadRequest("Cannot promote inactive user");
+            if (target.Level < int.MaxValue) target.Level++;
+            await _context.SaveChangesAsync();
+            return Ok(new { target.Id, target.Level });
+        }
+
+        // POST: /api/Users/{id}/demote (SuperAdmin) - decreases level but not below 1
+        [HttpPost("{id:int}/demote")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> Demote(int id)
+        {
+            var target = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && (u.Role == "Admin" || u.Role == "Seller"));
+            if (target == null) return NotFound();
+            if (!target.IsActive) return BadRequest("Cannot demote inactive user");
+            if (target.Level > 1) target.Level--;
+            await _context.SaveChangesAsync();
+            return Ok(new { target.Id, target.Level });
         }
     }
 }
