@@ -89,7 +89,19 @@ using (var scope = app.Services.CreateScope())
 
         if (!await db.Users.AnyAsync(u => u.Role == "SuperAdmin"))
         {
-            var superPassword = "SuperAdmin#12345"; // TODO: secure secret retrieval
+            // Retrieve super admin password from (in order): config (SuperAdmin:Password), env var SUPERADMIN_PASSWORD, fallback random
+            var configured = builder.Configuration["SuperAdmin:Password"] ?? Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD");
+            string superPassword;
+            bool generated = false;
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                superPassword = $"Auto!{Guid.NewGuid():N}".Substring(0, 16);
+                generated = true;
+            }
+            else
+            {
+                superPassword = configured;
+            }
             var hashed = BCrypt.Net.BCrypt.HashPassword(superPassword);
             db.Users.Add(new User
             {
@@ -99,7 +111,14 @@ using (var scope = app.Services.CreateScope())
                 CreatedAt = DateTime.UtcNow
             });
             await db.SaveChangesAsync();
-            Console.WriteLine("[SEED] SuperAdmin created (username: superadmin)");
+            if (generated)
+            {
+                Console.WriteLine("[SEED] SuperAdmin created (username: superadmin). Auto-generated password (store securely NOW): " + superPassword);
+            }
+            else
+            {
+                Console.WriteLine("[SEED] SuperAdmin created (username: superadmin) using provided secret.");
+            }
         }
 
         if (await db.Database.CanConnectAsync())

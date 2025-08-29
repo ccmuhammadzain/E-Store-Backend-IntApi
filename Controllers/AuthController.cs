@@ -7,6 +7,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using InventoryApi.Dtos;
 
 namespace InventoryApi.Controllers
 {
@@ -20,12 +21,11 @@ namespace InventoryApi.Controllers
         private static string NormalizeRole(string? role)
         {
             if (string.IsNullOrWhiteSpace(role)) return "Customer";
-            // Map ignoring case to canonical forms
             if (role.Equals("superadmin", StringComparison.OrdinalIgnoreCase)) return "SuperAdmin";
             if (role.Equals("admin", StringComparison.OrdinalIgnoreCase)) return "Admin";
             if (role.Equals("seller", StringComparison.OrdinalIgnoreCase)) return "Seller";
             if (role.Equals("customer", StringComparison.OrdinalIgnoreCase)) return "Customer";
-            return "Customer"; // fallback
+            return "Customer";
         }
 
         private readonly AppDbContext _context;
@@ -38,27 +38,33 @@ namespace InventoryApi.Controllers
         }
 
         [HttpPost("signup")]
-        public async Task<IActionResult> Signup(User user)
+        public async Task<IActionResult> Signup(SignupDto dto)
         {
-            user.Role = NormalizeRole(user.Role);
-            if (!AllowedRoles.Contains(user.Role)) return BadRequest("Invalid role");
-            if (await _context.Users.AnyAsync(u => u.Username == user.Username))
+            var role = NormalizeRole(dto.Role);
+            if (!AllowedRoles.Contains(role)) return BadRequest("Invalid role");
+            if (await _context.Users.AnyAsync(u => u.Username == dto.Username))
                 return BadRequest("Username already exists");
 
-            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(user.PasswordHash);
+            var user = new User
+            {
+                Username = dto.Username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+                Role = role,
+                CreatedAt = DateTime.UtcNow
+            };
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
             return Ok("User created");
         }
 
         [HttpPost("login")]
-        public async Task<IActionResult> Login(User login)
+        public async Task<IActionResult> Login(LoginDto dto)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == login.Username);
-            if (user == null || !BCrypt.Net.BCrypt.Verify(login.PasswordHash, user.PasswordHash))
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == dto.Username);
+            if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
                 return Unauthorized("Invalid credentials");
+            if (!user.IsActive) return Unauthorized("User deactivated");
 
-            // Normalize stored role if legacy data has different casing
             var normalized = NormalizeRole(user.Role);
             if (normalized != user.Role)
             {

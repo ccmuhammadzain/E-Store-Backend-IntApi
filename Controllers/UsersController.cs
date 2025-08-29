@@ -1,5 +1,6 @@
 using InventoryApi.Data;
 using InventoryApi.Dtos;
+using InventoryApi.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -27,12 +28,82 @@ namespace InventoryApi.Controllers
                     Id = u.Id,
                     Username = u.Username,
                     Role = u.Role,
-                    Email = null, // field not in model; placeholder for future
+                    Email = null,
                     CreatedAt = u.CreatedAt,
-                    IsActive = true // no flag in model; assume active
+                    IsActive = u.IsActive,
+                    DeactivatedAt = u.DeactivatedAt
                 })
                 .ToListAsync();
             return admins; // 200 [] if empty
+        }
+
+        private async Task<bool> IsLastActiveSuperAdminAsync(int userId)
+        {
+            var activeSupers = await _context.Users.CountAsync(u => u.Role == "SuperAdmin" && u.IsActive && u.Id != userId);
+            // Returns true if AFTER removing userId there would be zero left (meaning current user is the last one)
+            return activeSupers == 0; 
+        }
+
+        // POST: /api/Users/{id}/deactivate  (SuperAdmin)
+        [HttpPost("{id:int}/deactivate")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> Deactivate(int id)
+        {
+            var target = await _context.Users.FirstOrDefaultAsync(u => u.Id == id);
+            if (target == null) return NotFound();
+            if (target.Role == "SuperAdmin")
+            {
+                // Do not allow removing the last active superadmin
+                if (await IsLastActiveSuperAdminAsync(target.Id)) return BadRequest("Cannot deactivate the last active SuperAdmin");
+            }
+            // Only deactivate Admin / Seller (or SuperAdmin if multiple) per business rule
+            if (!(target.Role == "Admin" || target.Role == "Seller" || target.Role == "SuperAdmin")) return BadRequest("Cannot deactivate this role");
+            if (!target.IsActive) return NoContent();
+
+            target.IsActive = false;
+            target.DeactivatedAt = DateTime.UtcNow;
+            target.DeactivatedById = User.GetUserId();
+
+            // Soft hide owned products
+            var owned = await _context.Products.Where(p => p.OwnerId == target.Id && p.IsActive).ToListAsync();
+            foreach (var p in owned) p.IsActive = false;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict("Concurrency conflict while deactivating user");
+            }
+            return NoContent();
+        }
+
+        // POST: /api/Users/{id}/activate  (SuperAdmin)
+        [HttpPost("{id:int}/activate")]
+        [Authorize(Roles = "SuperAdmin")]
+        public async Task<IActionResult> Activate(int id)
+        {
+            var target = await _context.Users.FirstOrDefaultAsync(u => u.Id == id);
+            if (target == null) return NotFound();
+            if (!target.IsActive)
+            {
+                target.IsActive = true;
+                target.DeactivatedAt = null;
+                target.DeactivatedById = null;
+                // Business choice: keep products hidden until explicitly re-enabled? For now re-enable.
+                var products = await _context.Products.Where(p => p.OwnerId == target.Id && !p.IsActive).ToListAsync();
+                foreach (var p in products) p.IsActive = true;
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    return Conflict("Concurrency conflict while activating user");
+                }
+            }
+            return NoContent();
         }
     }
 }
