@@ -10,5 +10,6 @@ namespace InventoryApi.Dtos
         [JsonPropertyName("email")] public string? Email { get; set; }
         [JsonPropertyName("createdAt")] public DateTime? CreatedAt { get; set; }
         [JsonPropertyName("isActive")] public bool IsActive { get; set; } = true;
+        [JsonPropertyName("deactivatedAt")] public DateTime? DeactivatedAt { get; set; }
     }
 }

@@ -25,7 +25,9 @@ namespace InventoryApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<ProductDto>>> ListPublic()
         {
-            var list = await _db.Products.Include(p => p.Owner).AsNoTracking().ToListAsync();
+            var list = await _db.Products.Include(p => p.Owner)
+                .Where(p => p.IsActive && p.Owner.IsActive)
+                .AsNoTracking().ToListAsync();
             return Ok(list.Select(ToDto));
         }
 
@@ -34,7 +36,8 @@ namespace InventoryApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<ProductDto>> GetPublic(int id)
         {
-            var prod = await _db.Products.Include(p => p.Owner).FirstOrDefaultAsync(p => p.Id == id);
+            var prod = await _db.Products.Include(p => p.Owner)
+                .FirstOrDefaultAsync(p => p.Id == id && p.IsActive && p.Owner.IsActive);
             if (prod == null) return NotFound();
             return Ok(ToDto(prod));
         }
@@ -60,6 +63,10 @@ END";
 
             if (dto.Price < 0 || dto.Stock < 0) return BadRequest("Price/Stock cannot be negative");
             var userId = User.GetUserId();
+            // Ensure owner active
+            var ownerActive = await _db.Users.Where(u => u.Id == userId).Select(u => u.IsActive).FirstOrDefaultAsync();
+            if (!ownerActive) return Forbid();
+
             var entity = new Product
             {
                 Title = dto.Title,
@@ -69,7 +76,8 @@ END";
                 Stock = dto.Stock,
                 ProductImage = dto.ProductImage,
                 OwnerId = userId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                IsActive = true
             };
             _db.Products.Add(entity);
             await _db.SaveChangesAsync();
@@ -86,7 +94,9 @@ END";
             if (role == "Seller")
             {
                 var userId = User.GetUserId();
-                var own = await _db.Products.Include(p => p.Owner).Where(p => p.OwnerId == userId).AsNoTracking().ToListAsync();
+                var own = await _db.Products.Include(p => p.Owner)
+                    .Where(p => p.OwnerId == userId)
+                    .AsNoTracking().ToListAsync();
                 return Ok(own.Select(ToDto));
             }
             var list = await _db.Products.Include(p => p.Owner).AsNoTracking().ToListAsync();
@@ -98,8 +108,9 @@ END";
         public async Task<IActionResult> Update(int id, ProductCreateDto dto)
         {
             if (dto.Price < 0 || dto.Stock < 0) return BadRequest("Price/Stock cannot be negative");
-            var prod = await _db.Products.FirstOrDefaultAsync(p => p.Id == id);
+            var prod = await _db.Products.Include(p => p.Owner).FirstOrDefaultAsync(p => p.Id == id);
             if (prod == null) return NotFound();
+            if (!prod.IsActive || !prod.Owner.IsActive) return BadRequest("Product or owner inactive");
             if (User.IsInRole("Seller") && prod.OwnerId != User.GetUserId()) return Forbid();
             prod.Title = dto.Title;
             prod.Category = dto.Category;
@@ -119,7 +130,9 @@ END";
             var prod = await _db.Products.FirstOrDefaultAsync(p => p.Id == id);
             if (prod == null) return NotFound();
             if (User.IsInRole("Seller") && prod.OwnerId != User.GetUserId()) return Forbid();
-            _db.Products.Remove(prod);
+            // soft delete
+            prod.IsActive = false;
+            prod.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
             return NoContent();
         }

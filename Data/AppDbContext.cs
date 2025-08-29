@@ -48,6 +48,21 @@ namespace InventoryApi.Data
                 .WithMany()
                 .HasForeignKey(p => p.OwnerId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // User deactivation relationship (NoAction to avoid multiple cascade paths)
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.DeactivatedBy)
+                .WithMany()
+                .HasForeignKey(u => u.DeactivatedById)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            modelBuilder.Entity<User>()
+                .Property(u => u.IsActive)
+                .HasDefaultValue(true);
+
+            modelBuilder.Entity<Product>()
+                .Property(p => p.IsActive)
+                .HasDefaultValue(true);
         }
     }
 }
