@@ -11,5 +11,6 @@ namespace InventoryApi.Dtos
         [JsonPropertyName("createdAt")] public DateTime? CreatedAt { get; set; }
         [JsonPropertyName("isActive")] public bool IsActive { get; set; } = true;
         [JsonPropertyName("deactivatedAt")] public DateTime? DeactivatedAt { get; set; }
+        [JsonPropertyName("level")] public int Level { get; set; }
     }
 }
